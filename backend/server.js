@@ -45,8 +45,7 @@ app.listen(port, async () => {
   // Test DynamoDB connection
   try {
     const dynamoService = new DynamoService();
-    await dynamoService.checkTableExists();
-    console.log("✅ DynamoDB connection successful");
+    await dynamoService.init();
   } catch (error) {
     console.error("❌ DynamoDB connection failed:", error.message);
   }

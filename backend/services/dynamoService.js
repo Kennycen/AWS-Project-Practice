@@ -1,115 +1,120 @@
+import { DynamoDBClient, DescribeTableCommand } from "@aws-sdk/client-dynamodb";
 import {
-  DynamoDBClient,
-  PutItemCommand,
-  GetItemCommand,
+  DynamoDBDocumentClient,
+  PutCommand,
+  GetCommand,
   ScanCommand,
-  UpdateItemCommand,
-  DeleteItemCommand,
-  DescribeTableCommand,
-} from "@aws-sdk/client-dynamodb";
-import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
+  UpdateCommand,
+  DeleteCommand,
+} from "@aws-sdk/lib-dynamodb";
 
 export class DynamoService {
   constructor() {
-    this.client = new DynamoDBClient({
+    this.rawClient = new DynamoDBClient({
       region: process.env.AWS_REGION || "us-east-1",
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-      },
     });
+
+    this.client = DynamoDBDocumentClient.from(this.rawClient);
     this.tableName = process.env.DYNAMODB_TABLE_NAME;
+
+    if (!this.tableName) {
+      throw new Error("❌ DYNAMODB_TABLE_NAME environment variable is not set");
+    }
   }
 
-  async checkTableExists() {
-    if (!this.tableName) {
-      throw new Error("DYNAMODB_TABLE_NAME environment variable is not set");
-    }
-
+  // Run once at app startup to verify table exists
+  async init() {
     try {
-      const command = new DescribeTableCommand({ TableName: this.tableName });
-      await this.client.send(command);
-      return true;
+      await this.rawClient.send(
+        new DescribeTableCommand({ TableName: this.tableName })
+      );
+      console.log(`✅ DynamoDB table '${this.tableName}' verified`);
     } catch (error) {
       if (error.name === "ResourceNotFoundException") {
-        throw new Error(`DynamoDB table '${this.tableName}' does not exist`);
+        throw new Error(`❌ DynamoDB table '${this.tableName}' does not exist`);
       }
-      throw new Error(`Failed to check DynamoDB table: ${error.message}`);
+      throw new Error(`❌ Failed to check DynamoDB table: ${error.message}`);
     }
   }
 
   async createItem(item) {
     try {
-      const command = new PutItemCommand({
-        TableName: this.tableName,
-        Item: marshall(item),
-      });
-      await this.client.send(command);
+      await this.client.send(
+        new PutCommand({
+          TableName: this.tableName,
+          Item: item,
+        })
+      );
       return item;
     } catch (error) {
-      console.error("Error creating item in DynamoDB:", error);
-      throw new Error("Failed to create item");
+      console.error("CreateItem Error:", error);
+      throw new Error("Failed to create item in DynamoDB");
     }
   }
 
   async getAllItems() {
     try {
-      const command = new ScanCommand({ TableName: this.tableName });
-      const result = await this.client.send(command);
-      return (result.Items || []).map((item) => unmarshall(item));
+      const result = await this.client.send(
+        new ScanCommand({ TableName: this.tableName })
+      );
+      return result.Items || [];
     } catch (error) {
-      console.error("Error scanning DynamoDB:", error);
-      throw new Error("Failed to fetch items");
+      console.error("GetAllItems Error:", error);
+      throw new Error("Failed to fetch items from DynamoDB");
     }
   }
 
   async getItem(id) {
     try {
-      const command = new GetItemCommand({
-        TableName: this.tableName,
-        Key: marshall({ id }),
-      });
-      const result = await this.client.send(command);
-      return result.Item ? unmarshall(result.Item) : null;
+      const result = await this.client.send(
+        new GetCommand({
+          TableName: this.tableName,
+          Key: { id },
+        })
+      );
+      return result.Item || null;
     } catch (error) {
-      console.error("Error getting item from DynamoDB:", error);
-      throw new Error("Failed to fetch item");
+      console.error("GetItem Error:", error);
+      throw new Error("Failed to fetch item from DynamoDB");
     }
   }
 
-  async updateItem(id, item) {
+  async updateItem(id, updates) {
     try {
-      const command = new UpdateItemCommand({
-        TableName: this.tableName,
-        Key: marshall({ id }),
-        UpdateExpression:
-          "SET title = :title, description = :description, imageUrl = :imageUrl, updatedAt = :updatedAt",
-        ExpressionAttributeValues: marshall({
-          ":title": item.title,
-          ":description": item.description,
-          ":imageUrl": item.imageUrl,
-          ":updatedAt": item.updatedAt,
-        }),
-        ReturnValues: "ALL_NEW",
-      });
-      const result = await this.client.send(command);
-      return unmarshall(result.Attributes);
+      const result = await this.client.send(
+        new UpdateCommand({
+          TableName: this.tableName,
+          Key: { id },
+          UpdateExpression:
+            "SET title = :title, description = :description, imageUrl = :imageUrl, updatedAt = :updatedAt",
+          ExpressionAttributeValues: {
+            ":title": updates.title,
+            ":description": updates.description,
+            ":imageUrl": updates.imageUrl,
+            ":updatedAt": updates.updatedAt,
+          },
+          ReturnValues: "ALL_NEW",
+        })
+      );
+      return result.Attributes;
     } catch (error) {
-      console.error("Error updating item in DynamoDB:", error);
-      throw new Error("Failed to update item");
+      console.error("UpdateItem Error:", error);
+      throw new Error("Failed to update item in DynamoDB");
     }
   }
 
   async deleteItem(id) {
     try {
-      const command = new DeleteItemCommand({
-        TableName: this.tableName,
-        Key: marshall({ id }),
-      });
-      await this.client.send(command);
+      await this.client.send(
+        new DeleteCommand({
+          TableName: this.tableName,
+          Key: { id },
+        })
+      );
+      return { message: "Item deleted" };
     } catch (error) {
-      console.error("Error deleting item from DynamoDB:", error);
-      throw new Error("Failed to delete item");
+      console.error("DeleteItem Error:", error);
+      throw new Error("Failed to delete item from DynamoDB");
     }
   }
 }
